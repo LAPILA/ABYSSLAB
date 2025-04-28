@@ -8,6 +8,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;   // For PlayerInput, InputAction
+using Spine;
+using Spine.Unity;
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -16,6 +19,16 @@ using UnityEditor;
 public class TD2DPlayerController : MonoBehaviour
 {
     #region === Fields & References ===
+
+    [Header("Spine / Animation")]
+    public SkeletonAnimation skelAnim;
+
+    [SerializeField] private string idleAnim = "idle";
+    [SerializeField] private string walkAnim = "walk";
+    [SerializeField] private string walkStartAnim = "walkstart";
+    [SerializeField] private float startBlendTime = 0.1f;
+    private Spine.AnimationState animState;
+    private bool wasMoving;
 
     [Header("Input System")]
     [Tooltip("Attach the PlayerInput component that uses IA_Player input actions.")]
@@ -80,14 +93,8 @@ public class TD2DPlayerController : MonoBehaviour
 
         sprintRemaining = sprintDuration;
         sprintCooldownTimer = sprintCooldown;
-    }
-
-
-    private void Start()
-    {
-        // Cursor lock (Optional)
-        // Cursor.lockState = CursorLockMode.Locked;
-        // Cursor.visible = false;
+        animState = skelAnim.AnimationState;
+        animState.SetAnimation(0, idleAnim, true);
     }
 
     private void OnEnable()
@@ -141,6 +148,8 @@ public class TD2DPlayerController : MonoBehaviour
         // Sprint
         if (enableSprint)
             HandleSprint();
+
+        HandleAnimation();
     }
 
     private void FixedUpdate()
@@ -302,6 +311,29 @@ public class TD2DPlayerController : MonoBehaviour
     }
 
     #endregion
+
+    private void HandleAnimation()
+    {
+        bool isMoving = moveInput.sqrMagnitude > 0.01f;
+
+        if (isMoving)
+            skelAnim.Skeleton.ScaleX = (moveInput.x < 0) ? 1f : -1f;
+
+        if (isMoving && !wasMoving)
+        {
+            animState.SetAnimation(0, walkStartAnim, false);
+            animState.AddAnimation(0, walkAnim, true, startBlendTime);
+        }
+        else if (!isMoving && wasMoving)
+        {
+            animState.SetAnimation(0, idleAnim, true);
+        }
+
+        animState.TimeScale = isSprinting ? 1.4f : 1f;
+
+        wasMoving = isMoving;
+    }
+
 }
 
 
@@ -398,6 +430,29 @@ public class TD2DPlayerControllerEditor : Editor
                 new GUIContent("Sprint Duration"));
             EditorGUILayout.PropertyField(serializedObj.FindProperty("sprintCooldown"),
                 new GUIContent("Sprint Cooldown"));
+            EditorGUI.indentLevel--;
+        }
+
+        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
+        GUILayout.Label("Spine / Animation",
+            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
+
+        EditorGUILayout.Space();
+        EditorGUILayout.PropertyField(serializedObj.FindProperty("skelAnim"),
+            new GUIContent("SkeletonAnimation", "Spine SkeletonAnimation 컴포넌트"));
+
+        // SkeletonAnimation이 지정돼 있을 때만 세부 클립 노출
+        if (controller.skelAnim != null)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(serializedObj.FindProperty("idleAnim"),
+                new GUIContent("Idle Clip"));
+            EditorGUILayout.PropertyField(serializedObj.FindProperty("walkAnim"),
+                new GUIContent("Walk Clip"));
+            EditorGUILayout.PropertyField(serializedObj.FindProperty("walkStartAnim"),
+                new GUIContent("Walk-Start Clip"));
+            EditorGUILayout.PropertyField(serializedObj.FindProperty("startBlendTime"),
+                new GUIContent("Start→Walk Blend Time"));
             EditorGUI.indentLevel--;
         }
 
