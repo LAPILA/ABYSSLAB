@@ -1,109 +1,178 @@
+ï»¿//==============================================================================
+// GameStateData
+// ëŸ°íƒ€ì„ ì§„í–‰ í˜„í™©ì„ ë‹¨ì¼ ì‹±ê¸€í†¤ìœ¼ë¡œ ê´€ë¦¬
+// ì‹œê³„/ê¸°í›„/ìì›/ê°ì—¼/í¬ë¦¬ì²˜/ì ìˆ˜ ì „ë¶€ í¬í•¨
 //==============================================================================
-// °ÔÀÓÀÇ ÇöÀç »óÅÂ µ¥ÀÌÅÍ¸¦ ÀúÀå ¹× °ü¸®ÇÏ´Â Å¬·¡½º (·±Å¸ÀÓ »óÅÂ ÃßÀû)
-//==============================================================================
-using System.Collections;
+
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class GameStateData : MonoBehaviour
 {
-    public static GameStateData Instance { get; private set; }
+    public static GameStateData I { get; private set; }
 
-    [Header("¡á ÁøÇà Á¤º¸")]
-    public int currentDay = 1;
+    /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ì§„í–‰ & ì‹œê³„ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    public int currentDay = 0;
     public GamePhase currentPhase = GamePhase.None;
 
-    [Header("¡á ÇÃ·¹ÀÌ¾î ÀÚ¿ø")]
-    public float credit;
-    public float popularity;
-    public float reputation;
+    public int currentMinutes = 360;     // 6:00 AM (0~1439)
+    public int todayWeatherIdx = 0;       // 0:Clear
+    public Action OnMinuteTick;               // HUD ì‹œê³„ ê°±ì‹ ìš©
 
-    [Header("¡á Å©¸®Ã³ °ü¸®")]
-    public List<string> ownedCreatureIDs = new List<string>();
-    public List<string> exhibitedCreatureIDs = new List<string>();
+    /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ìì› â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    public int Credit { get; private set; }
+    public int Popularity { get; private set; }
+    public int Reputation { get; private set; }
 
-    [Header("¡á ¼º°ú ¹× ±â·Ï")]
-    public int successCount;
-    public int failureCount;
-    public int totalScore;
+    public Action<int> OnCreditChanged;
+    public Action<int> OnPopularityChanged;
+    public Action<int> OnReputationChanged;
+
+    /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ê°ì—¼ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    public int infectionStage = 0;
+    public int nextInfectionUpgradeDay = 14;   // Nì¼ í›„ +1ë‹¨ê³„
+
+    /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ í¬ë¦¬ì³ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    public readonly List<string> ownedCreatures = new();
+    public readonly List<string> exhibitedToday = new();
+
+    /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ì„±ê³¼ & ì ìˆ˜ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    public int totalScore { get; set; }
+    public int successCount { get; set; }
+    public int failureCount { get; set; }
+
+    /* ======================================================================= */
+    #region â–¶ ì´ˆê¸°í™” & ë¦¬ì…‹
+    /* ======================================================================= */
 
     private void Awake()
     {
-        // ½Ì±ÛÅæ ¼³Á¤
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
-        Instance = this;
-        DontDestroyOnLoad(gameObject);
+        if (I != null && I != this) { Destroy(gameObject); return; }
+        I = this; DontDestroyOnLoad(gameObject);
 
-        // GameConfig·ÎºÎÅÍ ÃÊ±â ÀÚ¿ø ·Îµå
-        var cfg = Resources.Load<GameConfig>("GameConfig");
-        if (cfg != null)
-        {
-            credit = cfg.initialCredit;
-            popularity = cfg.initialPopularity;
-            reputation = cfg.initialReputation;
-        }
+        ResetGameState();
     }
 
-    //--- °ÔÀÓ ½ÃÀÛ È¤Àº »õ °ÔÀÓ ½Ã È£Ãâ ---
     public void ResetGameState()
     {
-        currentDay = 1;
-        currentPhase = GamePhase.None;
+        var cfg = GameManager.Instance?.CFG;
+        if (cfg == null)
+        {
+            Debug.LogError("[GameStateData] GameManager.Instance.CFG ê°€ null ì…ë‹ˆë‹¤!");
+            return;
+        }
+        currentDay = 0;
+        currentPhase = GamePhase.Title;
+        currentMinutes = 360;
+        if (cfg == null)
+        {
+            Debug.LogError("<GameStateData> GameConfig.asset ì„ Resources í´ë”ì—ì„œ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤!");
+        }
+        Credit = cfg.initialCredit;
+        Popularity = cfg.initialPopularity;
+        Reputation = cfg.initialReputation;
 
-        var cfg = Resources.Load<GameConfig>("GameConfig");
-        credit = cfg != null ? cfg.initialCredit : 0f;
-        popularity = cfg != null ? cfg.initialPopularity : 0f;
-        reputation = cfg != null ? cfg.initialReputation : 0f;
+        infectionStage = cfg.startInfectionStage;
+        nextInfectionUpgradeDay = cfg.infectionStagePeriodDays;
 
-        ownedCreatureIDs.Clear();
-        exhibitedCreatureIDs.Clear();
+        ownedCreatures.Clear();
+        exhibitedToday.Clear();
 
+        totalScore = 0;
         successCount = 0;
         failureCount = 0;
-        totalScore = 0;
     }
+    #endregion
 
-    //--- ³·ÀÌ ½ÃÀÛµÉ ¶§ È£Ãâ ---
+    /* ======================================================================= */
+    #region â–¶ ì‹œê°„â€§ê¸°í›„
+    /* ======================================================================= */
+    public void AdvanceMinutes(int min)
+    {
+        currentMinutes = (currentMinutes + min) % 1440;
+        OnMinuteTick?.Invoke();
+    }
+    public void RollNewWeather(int idx) => todayWeatherIdx = idx;
+    #endregion
+
+    /* ======================================================================= */
+    #region â–¶ ìì› ë³€ê²½
+    /* ======================================================================= */
+    public void AddCredit(int amount)
+    {
+        Credit += amount;
+        OnCreditChanged?.Invoke(Credit);
+    }
+    public void AddPopularity(int delta)
+    {
+        Popularity += delta;
+        OnPopularityChanged?.Invoke(Popularity);
+    }
+    public void AddReputation(int delta)
+    {
+        Reputation += delta;
+        OnReputationChanged?.Invoke(Reputation);
+    }
+    #endregion
+
+    /* ======================================================================= */
+    #region â–¶ í¬ë¦¬ì³ ê´€ë¦¬
+    /* ======================================================================= */
+    public void AddOwnedCreature(string id)
+    {
+        if (!ownedCreatures.Contains(id))
+            ownedCreatures.Add(id);
+    }
+    public void AddExhibitedCreature(string id)
+    {
+        if (!exhibitedToday.Contains(id))
+            exhibitedToday.Add(id);
+    }
+    #endregion
+
+    /* ======================================================================= */
+    #region â–¶ ë‚®/ë°¤ ì „í™˜ & ê°ì—¼ ì§„í–‰
+    /* ======================================================================= */
     public void StartNewDay()
     {
         currentDay++;
-        exhibitedCreatureIDs.Clear();
         currentPhase = GamePhase.Day;
-    }
+        exhibitedToday.Clear();
 
-    //--- Å©¸®Ã³ º¸À¯ Ã³¸® ---
-    public void AddOwnedCreature(string id)
-    {
-        if (!ownedCreatureIDs.Contains(id))
-            ownedCreatureIDs.Add(id);
+        /* ê°ì—¼ ë‹¨ê³„ ì²´í¬ */
+        if (currentDay >= nextInfectionUpgradeDay)
+        {
+            infectionStage = Mathf.Min(
+                infectionStage + 1,
+                Resources.Load<GameConfig>("GameConfig").maxInfectionStage
+            );
+            nextInfectionUpgradeDay +=
+                Resources.Load<GameConfig>("GameConfig").infectionStagePeriodDays;
+        }
     }
+    #endregion
 
-    //--- ´çÀÏ Àü½Ã µî·Ï Ã³¸® ---
-    public void AddExhibitedCreature(string id)
+    /* ======================================================================= */
+    #region â–¶ ì„±ê³¼ ì§‘ê³„ (ë‚® ê²°ê³¼Â·ì‹¤íŒ¨)
+    /* ======================================================================= */
+    public void ApplyDayResults(int earnCredit, int earnPopularity,
+                                int deltaReputation, int earnedScore)
     {
-        if (!exhibitedCreatureIDs.Contains(id))
-            exhibitedCreatureIDs.Add(id);
-    }
+        AddCredit(earnCredit);
+        AddPopularity(earnPopularity);
+        AddReputation(deltaReputation);
 
-    //--- ³· °á°ú ¹İ¿µ (¼öÀÍ¡¤Á¡¼ö µî) ---
-    public void ApplyDayResults(float earnCredit, float earnPopularity, float deltaReputation, int earnedScore)
-    {
-        credit += earnCredit;
-        popularity += earnPopularity;
-        reputation += deltaReputation;
         totalScore += earnedScore;
-        successCount++;
+        successCount += 1;
     }
 
-    //--- ½ÇÆĞ Ã³¸® (´çÀÏ »ç¸Á ½Ã) ---
-    public void RegisterFailure(int penaltyScore = 0, float penaltyReputation = 5f)
+    public void RegisterFailure(int penaltyScore = 0, int penaltyRep = 5)
     {
-        failureCount++;
-        totalScore -= penaltyScore;
-        reputation -= penaltyReputation;
+        totalScore = Mathf.Max(0, totalScore - penaltyScore);
+        Reputation -= penaltyRep;
+        failureCount += 1;
+        OnReputationChanged?.Invoke(Reputation);
     }
+    #endregion
 }
