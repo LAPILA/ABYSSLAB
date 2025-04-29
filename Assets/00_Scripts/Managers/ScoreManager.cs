@@ -1,85 +1,114 @@
 //==============================================================================
-//  ScoreManager
-//  모든 점수 산식을 한곳에서 관리 (낮 결과·실패 패널티·보너스 등)
+// ScoreManager
+// - 모든 점수 산식을 일괄 관리
+// - 낮 결과 계산, 실패 시 패널티 부여
 //==============================================================================
 
 using UnityEngine;
 using System;
+using Sirenix.OdinInspector;
 
+[DefaultExecutionOrder(-80)]
 public class ScoreManager : MonoBehaviour
 {
     public static ScoreManager I { get; private set; }
 
-    /* ───── 가중치 & 보너스 ───── */
-    [Header("점수 가중치")]
-    [Tooltip("획득 크레딧 1당 가산점")]
-    [Min(0)] public float weightCredit = 0.5f;
-    [Tooltip("인기도 1당 가산점")]
-    [Min(0)] public float weightPopularity = 1.0f;
-    [Tooltip("평판 1당 가산점")]
-    [Min(0)] public float weightReputation = 2.0f;
-    [Header("일차 생존 보너스")]
-    public int bonusPerDaySurvived = 50;
+    /* ======================================================================= */
+    #region ▶ 점수 가중치
+    /* ======================================================================= */
 
-    /* ───── 콜백 이벤트 ───── */
-    /// <summary>하루 점수 계산이 끝났을 때 (계산된 DayScore 전달)</summary>
-    public Action<int> OnDayScoreCalculated;
+    [TitleGroup("Score Settings")]
+    [BoxGroup("Score Settings/Weights")]
+    [Tooltip("획득 크레딧 1당 가산점")]
+    [MinValue(0)] public float weightCredit = 0.5f;
+
+    [BoxGroup("Score Settings/Weights")]
+    [Tooltip("인기도 1당 가산점")]
+    [MinValue(0)] public float weightPopularity = 1.0f;
+
+    [BoxGroup("Score Settings/Weights")]
+    [Tooltip("평판 1당 가산점")]
+    [MinValue(0)] public float weightReputation = 2.0f;
+
+    [BoxGroup("Score Settings/Bonus")]
+    [Tooltip("하루 생존당 추가 보너스")]
+    public int bonusPerDaySurvived = 50;
+    #endregion
+    /* ======================================================================= */
+    #region ▶ 패널티 설정
+    /* ======================================================================= */
+
+    [TitleGroup("Penalty Settings")]
+    [Tooltip("실패 시 점수 차감량")]
+    public int flatPenaltyScore = 100;
+
+    [Tooltip("실패 시 평판 차감량")]
+    public int penaltyReputation = 5;
+    #endregion
+    /* ======================================================================= */
+    #region ▶ 콜백 이벤트
+    /* ======================================================================= */
+
+    public event Action<int> OnDayScoreCalculated;
+    #endregion
+    /* ======================================================================= */
+    #region ▶ 유니티 생명주기
+    /* ======================================================================= */
 
     private void Awake()
     {
-        if (I && I != this) { Destroy(gameObject); return; }
+        if (I != null && I != this) { Destroy(gameObject); return; }
         I = this;
         DontDestroyOnLoad(gameObject);
     }
+    #endregion
+    /* ======================================================================= */
+    #region ▶ 낮 결과 점수 계산
+    /* ======================================================================= */
 
-    /* ====================================================================== */
-    /*  낮 페이즈 종료 → 점수 계산                                            */
-    /* ====================================================================== */
+    /// <summary>
+    /// 하루가 끝날 때 점수 계산
+    /// </summary>
     public void CalculateDayScore()
     {
-        GameStateData st = GameStateData.I;
+        var st = GameStateData.I;
 
-        /* ── 개별 항목 가중치 적용 ── */
         float scoreCredit = st.Credit * weightCredit;
         float scorePopularity = st.Popularity * weightPopularity;
         float scoreReputation = st.Reputation * weightReputation;
-
-        /* ── 생존 일차 보너스 ── */
         int survivedBonus = st.currentDay * bonusPerDaySurvived;
 
-        /* ── 종합 ── */
         int dayScore = Mathf.RoundToInt(
-              scoreCredit
-            + scorePopularity
-            + scoreReputation
-            + survivedBonus
+            scoreCredit + scorePopularity + scoreReputation + survivedBonus
         );
 
-        /* ── GameStateData 반영 ── */
         st.totalScore += dayScore;
         st.successCount++;
 
-        /* ── UI / 로그를 위한 콜백 ── */
         OnDayScoreCalculated?.Invoke(dayScore);
 
-        Debug.Log($"[Score] Day{st.currentDay}  ▶  +{dayScore} pts (Total {st.totalScore})");
+        Debug.Log($"[Score] Day {st.currentDay} ▶ +{dayScore} pts (Total {st.totalScore})");
     }
 
-    /* ====================================================================== */
-    /*  실패(밤 사망·탈출 다수 등) 패널티                                     */
-    /* ====================================================================== */
-    [Header("패널티 설정")]
-    public int flatPenaltyScore = 100;
-    public int penaltyReputation = 5;
+    #endregion
 
+    /* ======================================================================= */
+    #region ▶ 실패 시 패널티 적용
+    /* ======================================================================= */
+
+    /// <summary>
+    /// 실패 시 패널티 적용
+    /// </summary>
     public void ApplyFailurePenalty(string reason = "")
     {
-        GameStateData st = GameStateData.I;
+        var st = GameStateData.I;
 
         st.totalScore = Mathf.Max(0, st.totalScore - flatPenaltyScore);
         st.failureCount++;
         st.AddReputation(-penaltyReputation);
 
-        Debug.LogWarning($"[Score] Failure Penalty  -{flatPenaltyScore} pts,  -{penaltyReputation} REP  ({reason})");
+        Debug.LogWarning($"[Score] Failure Penalty  -{flatPenaltyScore} pts,  -{penaltyReputation} REP ({reason})");
     }
+
+    #endregion
 }

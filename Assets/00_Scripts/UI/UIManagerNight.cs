@@ -1,21 +1,29 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
+using Sirenix.OdinInspector;
 
 public class UIManagerNight : MonoBehaviour
 {
     public static UIManagerNight I { get; private set; }
 
-    [Header("Text Slots")]
+    [FoldoutGroup("Night UI")]
+
+    [FoldoutGroup("Night UI/Texts")]
+    [Required]
     [SerializeField] private Text dayText;
+
+    [FoldoutGroup("Night UI/Texts")]
+    [Required]
     [SerializeField] private Text clockText;
 
-    [Header("Weather")]
+    [FoldoutGroup("Night UI/Weather")]
+    [Required]
     [SerializeField] private Image weatherIcon;
+
+    /* ───── 내부 상태 ───── */
     private Sprite[] _weatherIcons;
-
-    private GameConfig _cfg => GameManager.Instance.CFG;
-
     private bool hasAutoPhaseTriggered = false;
+    private GameConfig _cfg => GameManager.Instance.CFG;
 
     private void Awake()
     {
@@ -26,14 +34,10 @@ public class UIManagerNight : MonoBehaviour
     private void OnDestroy()
     {
         if (GameStateData.I != null)
-        {
             GameStateData.I.OnMinuteTick -= RefreshClock;
-        }
 
         if (TimeManager.Instance != null)
-        {
             TimeManager.Instance.OnTimeUpdate -= CheckAutoDayTransition;
-        }
     }
 
     public void InitUI(int today)
@@ -50,11 +54,8 @@ public class UIManagerNight : MonoBehaviour
         hasAutoPhaseTriggered = false;
     }
 
-    public void UpdateDay(int day)
-    {
-        if (dayText != null)
-            dayText.text = $"DAY {day:00}";
-    }
+    private void UpdateDay(int day) =>
+        dayText.text = $"DAY {day:00}";
 
     private void UpdateWeather(int idx)
     {
@@ -67,10 +68,8 @@ public class UIManagerNight : MonoBehaviour
         int minutes = GameStateData.I.currentMinutes;
         int h24 = minutes / 60;
         int m = minutes % 60;
-
         bool isAM = h24 < 12;
         int h12 = h24 % 12; if (h12 == 0) h12 = 12;
-
         clockText.text = $"{h12:00}:{m:00} {(isAM ? "AM" : "PM")}";
     }
 
@@ -84,5 +83,4 @@ public class UIManagerNight : MonoBehaviour
             TimeManager.Instance.ForceEndPhase();
         }
     }
-
 }

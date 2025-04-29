@@ -1,115 +1,125 @@
-//------------------------------------------------------------------------------
-// CHANGE LOG
-// version 1.0.0
-// "IA_Player-based 2.5D/2D Controller (8-direction movement, shift sprint, zoom) - NO sprint bar."
-//------------------------------------------------------------------------------
+//==============================================================================
+// TD2DPlayerController (Odin Inspector + 디버그 버튼 버전)
+//==============================================================================
 
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem;   // For PlayerInput, InputAction
-using Spine;
+using UnityEngine.InputSystem;
 using Spine.Unity;
-
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
+using Sirenix.OdinInspector;
 
 [RequireComponent(typeof(Rigidbody))]
 public class TD2DPlayerController : MonoBehaviour
 {
-    #region === Fields & References ===
+    [Title("Spine / Animation")]
+    [BoxGroup("Spine")]
+    [Required] public SkeletonAnimation skelAnim;
 
-    [Header("Spine / Animation")]
-    public SkeletonAnimation skelAnim;
+    [BoxGroup("Spine")]
+    [LabelText("Idle Animation")] public string idleAnim = "idle";
 
-    [SerializeField] private string idleAnim = "idle";
-    [SerializeField] private string walkAnim = "walk";
-    [SerializeField] private string walkStartAnim = "walkstart";
-    [SerializeField] private float startBlendTime = 0.1f;
+    [BoxGroup("Spine")]
+    [LabelText("Walk Animation")] public string walkAnim = "walk";
+
+    [BoxGroup("Spine")]
+    [LabelText("Walk Start Animation")] public string walkStartAnim = "walkstart";
+
+    [BoxGroup("Spine")]
+    [Range(0f, 1f)][LabelText("Start → Walk Blend Time")] public float startBlendTime = 0.1f;
+
     private Spine.AnimationState animState;
     private bool wasMoving;
 
-    [Header("Input System")]
-    [Tooltip("Attach the PlayerInput component that uses IA_Player input actions.")]
-    public PlayerInput playerInput;
+    [Title("Input System")]
+    [BoxGroup("Input")]
+    [Required] public PlayerInput playerInput;
+    private IA_Player _inputActions;
 
-    private IA_Player _inputActions;  // Generated class from IA_Player.inputactions
+    [Title("Camera Settings")]
+    [BoxGroup("Camera")]
+    [Required] public Camera playerCamera;
 
-    [Header("Camera Settings")]
-    public Camera playerCamera;
+    [BoxGroup("Camera")]
     [Range(1f, 179f)] public float normalFOV = 60f;
+
+    [BoxGroup("Camera")]
     public bool enableZoom = true;
+
+    [BoxGroup("Camera")]
     public bool holdToZoom = false;
+
+    [BoxGroup("Camera")]
     [Range(1f, 179f)] public float zoomFOV = 30f;
+
+    [BoxGroup("Camera")]
     [Range(0.1f, 10f)] public float zoomStepTime = 5f;
 
-    // Internal
     private bool isZoomed;
     private bool isZoomHeld;
 
-    [Header("Movement Settings")]
+    [Title("Movement Settings")]
+    [BoxGroup("Movement")]
     public bool playerCanMove = true;
+
+    [BoxGroup("Movement")]
     [Range(0.1f, 20f)] public float walkSpeed = 5f;
+
+    [BoxGroup("Movement")]
     [Range(0.1f, 30f)] public float sprintSpeed = 8f;
-    [Tooltip("Max velocity change in x/z per frame.")]
+
+    [BoxGroup("Movement")]
+    [Tooltip("Max velocity change per frame.")]
     public float maxVelocityChange = 10f;
 
-    // Sprint
+    [Title("Sprint Settings")]
+    [BoxGroup("Sprint")]
     public bool enableSprint = true;
-    [Tooltip("If true, shift를 누르는 동안만, false=Toggle")]
+
+    [BoxGroup("Sprint")]
     public bool holdToSprint = true;
-    [Tooltip("If true, sprint는 무제한.")]
-    public bool unlimitedSprint = false;
-    [Range(1f, 30f)]
-    public float sprintDuration = 5f;
-    [Range(0.1f, 5f)]
-    public float sprintCooldown = 0.5f;
 
     private bool isSprinting;
     private bool isSprintHeld;
-    private float sprintRemaining;
-    private bool sprintOnCooldown;
-    private float sprintCooldownTimer;
+    private Vector3 _spawnPosition;
 
-    // Move input
     private Vector2 moveInput;
-    private float fixedY;
-
-    // Components
     private Rigidbody rb;
 
-    #endregion
-
-    #region === Unity Callbacks ===
+    // ===== 디버그용 버튼 =====
+    [Title("Debug Actions")]
+    [BoxGroup("Debug Actions")]
+    [Button("Reset to Spawn Position")]
+    private void ResetPlayerPosition()
+    {
+        transform.position = _spawnPosition;
+        rb.velocity = Vector3.zero;
+        Debug.Log("[DEBUG] Player Reset to Spawn Position");
+    }
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
         rb.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionY;
 
-        if (playerCamera)
+        _spawnPosition = transform.position;
+
+        if (playerCamera != null)
             playerCamera.fieldOfView = normalFOV;
 
-        sprintRemaining = sprintDuration;
-        sprintCooldownTimer = sprintCooldown;
         animState = skelAnim.AnimationState;
         animState.SetAnimation(0, idleAnim, true);
     }
 
     private void OnEnable()
     {
-        if (!playerInput)
+        if (playerInput == null)
         {
-            Debug.LogWarning("PlayerInput not assigned in inspector!");
+            Debug.LogWarning("PlayerInput not assigned.");
             return;
         }
 
-        // 생성된 IA_Player 클래스 인스턴스화 & 활성화
         _inputActions = new IA_Player();
         _inputActions.Player.Enable();
 
-        // 구독 (Move, Sprint, Zoom)
         _inputActions.Player.Move.performed += OnMovePerformed;
         _inputActions.Player.Move.canceled += OnMoveCanceled;
 
@@ -122,16 +132,14 @@ public class TD2DPlayerController : MonoBehaviour
 
     private void OnDisable()
     {
-        _inputActions?.Player.Disable();
-
         if (_inputActions != null)
         {
+            _inputActions.Player.Disable();
+
             _inputActions.Player.Move.performed -= OnMovePerformed;
             _inputActions.Player.Move.canceled -= OnMoveCanceled;
-
             _inputActions.Player.Sprint.performed -= OnSprintPerformed;
             _inputActions.Player.Sprint.canceled -= OnSprintCanceled;
-
             _inputActions.Player.Zoom.performed -= OnZoomPerformed;
             _inputActions.Player.Zoom.canceled -= OnZoomCanceled;
         }
@@ -141,86 +149,56 @@ public class TD2DPlayerController : MonoBehaviour
     {
         if (!playerCanMove) return;
 
-        // Zoom
-        if (enableZoom)
-            HandleZoom();
-
-        // Sprint
-        if (enableSprint)
-            HandleSprint();
-
+        if (enableZoom) HandleZoom();
+        if (enableSprint) HandleSprint();
         HandleAnimation();
     }
 
     private void FixedUpdate()
     {
         if (!playerCanMove) return;
-
         HandleMovement();
     }
 
-    #endregion
+    #region Input Handling
 
-    #region === Input Callbacks ===
-
-    // Move
-    private void OnMovePerformed(InputAction.CallbackContext ctx)
-    {
+    private void OnMovePerformed(InputAction.CallbackContext ctx) =>
         moveInput = ctx.ReadValue<Vector2>();
-    }
-    private void OnMoveCanceled(InputAction.CallbackContext ctx)
-    {
-        moveInput = Vector2.zero;
-    }
 
-    // Sprint
+    private void OnMoveCanceled(InputAction.CallbackContext ctx) =>
+        moveInput = Vector2.zero;
+
     private void OnSprintPerformed(InputAction.CallbackContext ctx)
     {
-        if (holdToSprint)
-        {
-            isSprintHeld = true;
-        }
-        else
-        {
-            // toggle
-            isSprinting = !isSprinting;
-        }
-    }
-    private void OnSprintCanceled(InputAction.CallbackContext ctx)
-    {
-        if (holdToSprint)
-            isSprintHeld = false;
+        if (holdToSprint) isSprintHeld = true;
+        else isSprinting = !isSprinting;
     }
 
-    // Zoom
+    private void OnSprintCanceled(InputAction.CallbackContext ctx)
+    {
+        if (holdToSprint) isSprintHeld = false;
+    }
+
     private void OnZoomPerformed(InputAction.CallbackContext ctx)
     {
-        if (holdToZoom)
-        {
-            isZoomHeld = true;
-        }
-        else
-        {
-            // toggle
-            isZoomed = !isZoomed;
-        }
+        if (holdToZoom) isZoomHeld = true;
+        else isZoomed = !isZoomed;
     }
+
     private void OnZoomCanceled(InputAction.CallbackContext ctx)
     {
-        if (holdToZoom)
-            isZoomHeld = false;
+        if (holdToZoom) isZoomHeld = false;
     }
 
     #endregion
 
-    #region === Movement ===
+    #region Core Logic
 
     private void HandleMovement()
     {
         Vector3 inputVec = new Vector3(moveInput.x, 0f, moveInput.y).normalized;
-
-        float currentSpeed = isSprinting ? sprintSpeed : walkSpeed;
-        Vector3 targetVelocity = inputVec * currentSpeed;
+        float speed = isSprinting ? sprintSpeed : walkSpeed;
+        Vector3 targetVelocity = inputVec * speed;
 
         Vector3 velocity = rb.velocity;
         Vector3 velocityChange = targetVelocity - velocity;
@@ -230,87 +208,28 @@ public class TD2DPlayerController : MonoBehaviour
         velocityChange.z = Mathf.Clamp(velocityChange.z, -maxVelocityChange, maxVelocityChange);
 
         rb.AddForce(velocityChange, ForceMode.VelocityChange);
-
     }
-
-
-    #endregion
-
-    #region === Sprint ===
 
     private void HandleSprint()
     {
-        // hold
+        if (!enableSprint) return;
+
         if (holdToSprint)
         {
-            if (isSprintHeld && !isSprinting)
-                isSprinting = true;
-            else if (!isSprintHeld && isSprinting)
-                isSprinting = false;
-        }
-
-        // Unlimited or not
-        if (isSprinting)
-        {
-            if (!unlimitedSprint)
-            {
-                sprintRemaining -= Time.deltaTime;
-                if (sprintRemaining <= 0f)
-                {
-                    // 스프린트 끔 + 쿨다운
-                    isSprinting = false;
-                    sprintOnCooldown = true;
-                }
-            }
-        }
-        else
-        {
-            // 회복
-            if (!unlimitedSprint && sprintRemaining < sprintDuration)
-            {
-                sprintRemaining += Time.deltaTime;
-                if (sprintRemaining > sprintDuration)
-                    sprintRemaining = sprintDuration;
-            }
-        }
-
-        // 쿨다운
-        if (sprintOnCooldown)
-        {
-            sprintCooldownTimer -= Time.deltaTime;
-            if (sprintCooldownTimer <= 0f)
-            {
-                sprintOnCooldown = false;
-                sprintCooldownTimer = sprintCooldown;
-            }
+            isSprinting = isSprintHeld;
         }
     }
-
-    #endregion
-
-    #region === Zoom ===
 
     private void HandleZoom()
     {
-        // hold
-        if (holdToZoom)
-        {
-            isZoomed = isZoomHeld;
-        }
+        if (holdToZoom) isZoomed = isZoomHeld;
 
-        // FOV 보간
-        if (playerCamera)
+        if (playerCamera != null)
         {
-            float targetFOV = (isZoomed) ? zoomFOV : normalFOV;
-            playerCamera.fieldOfView = Mathf.Lerp(
-                playerCamera.fieldOfView,
-                targetFOV,
-                Time.deltaTime * zoomStepTime
-            );
+            float targetFOV = isZoomed ? zoomFOV : normalFOV;
+            playerCamera.fieldOfView = Mathf.Lerp(playerCamera.fieldOfView, targetFOV, Time.deltaTime * zoomStepTime);
         }
     }
-
-    #endregion
 
     private void HandleAnimation()
     {
@@ -330,139 +249,8 @@ public class TD2DPlayerController : MonoBehaviour
         }
 
         animState.TimeScale = isSprinting ? 1.4f : 1f;
-
         wasMoving = isMoving;
     }
 
+    #endregion
 }
-
-
-//--------------------- CUSTOM EDITOR ---------------------
-#if UNITY_EDITOR
-[CustomEditor(typeof(TD2DPlayerController)), InitializeOnLoadAttribute]
-public class TD2DPlayerControllerEditor : Editor
-{
-    private TD2DPlayerController controller;
-    private SerializedObject serializedObj;
-
-    private void OnEnable()
-    {
-        controller = (TD2DPlayerController)target;
-        serializedObj = new SerializedObject(controller);
-    }
-
-    public override void OnInspectorGUI()
-    {
-        serializedObj.Update();
-
-        EditorGUILayout.Space();
-        GUILayout.Label("2D/2.5D Player Controller (IA_Player)",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 });
-        GUILayout.Label("version 1.0.0",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Italic, fontSize = 10 });
-        EditorGUILayout.Space();
-
-        // 1) Input System
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        GUILayout.Label("Input System",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
-        EditorGUILayout.Space();
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("playerInput"),
-            new GUIContent("Player Input", "Attach the PlayerInput with IA_Player"));
-
-        // 2) Camera
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        GUILayout.Label("Camera Settings",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
-        EditorGUILayout.Space();
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("playerCamera"),
-            new GUIContent("Camera"));
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("normalFOV"),
-            new GUIContent("Normal FOV"));
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("enableZoom"),
-            new GUIContent("Enable Zoom"));
-        if (controller.enableZoom)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("holdToZoom"),
-                new GUIContent("Hold To Zoom"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("zoomFOV"),
-                new GUIContent("Zoom FOV"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("zoomStepTime"),
-                new GUIContent("Zoom Step Time"));
-            EditorGUI.indentLevel--;
-        }
-
-        // 3) Movement
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        GUILayout.Label("Movement Settings",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
-        EditorGUILayout.Space();
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("playerCanMove"),
-            new GUIContent("Player Can Move"));
-        if (controller.playerCanMove)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("walkSpeed"),
-                new GUIContent("Walk Speed"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("sprintSpeed"),
-                new GUIContent("Sprint Speed"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("maxVelocityChange"),
-                new GUIContent("Max Velocity Change"));
-            EditorGUI.indentLevel--;
-        }
-
-        // 4) Sprint
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        GUILayout.Label("Sprint Settings",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold });
-        EditorGUILayout.Space();
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("enableSprint"),
-            new GUIContent("Enable Sprint"));
-        if (controller.enableSprint)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("holdToSprint"),
-                new GUIContent("Hold To Sprint"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("unlimitedSprint"),
-                new GUIContent("Unlimited Sprint"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("sprintDuration"),
-                new GUIContent("Sprint Duration"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("sprintCooldown"),
-                new GUIContent("Sprint Cooldown"));
-            EditorGUI.indentLevel--;
-        }
-
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        GUILayout.Label("Spine / Animation",
-            new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
-
-        EditorGUILayout.Space();
-        EditorGUILayout.PropertyField(serializedObj.FindProperty("skelAnim"),
-            new GUIContent("SkeletonAnimation", "Spine SkeletonAnimation 컴포넌트"));
-
-        // SkeletonAnimation이 지정돼 있을 때만 세부 클립 노출
-        if (controller.skelAnim != null)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("idleAnim"),
-                new GUIContent("Idle Clip"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("walkAnim"),
-                new GUIContent("Walk Clip"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("walkStartAnim"),
-                new GUIContent("Walk-Start Clip"));
-            EditorGUILayout.PropertyField(serializedObj.FindProperty("startBlendTime"),
-                new GUIContent("Start→Walk Blend Time"));
-            EditorGUI.indentLevel--;
-        }
-
-        // Save changes
-        if (GUI.changed)
-        {
-            EditorUtility.SetDirty(controller);
-            Undo.RecordObject(controller, "TD2DPlayerController changed");
-            serializedObj.ApplyModifiedProperties();
-        }
-    }
-}
-#endif

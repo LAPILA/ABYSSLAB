@@ -1,46 +1,105 @@
 ﻿//==============================================================================
 // GameStateData
-// 런타임 진행 현황을 단일 싱글톤으로 관리
-// 시계/기후/자원/감염/크리처/점수 전부 포함
+// - 런타임 전체 게임 상태를 싱글톤으로 관리
+// - 시계/기후/자원/감염/크리처/점수 시스템 포함
 //==============================================================================
 
+using Sirenix.OdinInspector;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class GameStateData : MonoBehaviour
+[DefaultExecutionOrder(-90)]
+public class GameStateData : SerializedMonoBehaviour
 {
     public static GameStateData I { get; private set; }
 
-    /* ───────────── 진행 & 시계 ───────────── */
+    /* ======================================================================= */
+    #region ▶ 진행 & 시계
+    /* ======================================================================= */
+
+    [TitleGroup("Progress & Clock")]
+    [PropertyOrder(0)]
+    [ReadOnly, ShowInInspector]
     public int currentDay = 0;
+
+    [PropertyOrder(1)]
+    [ReadOnly, ShowInInspector]
     public GamePhase currentPhase = GamePhase.None;
 
-    public int currentMinutes = 360;     // 6:00 AM (0~1439)
-    public int todayWeatherIdx = 0;       // 0:Clear
-    public Action OnMinuteTick;               // HUD 시계 갱신용
+    [PropertyOrder(2)]
+    [ReadOnly, ShowInInspector]
+    public int currentMinutes = 540;
 
-    /* ───────────── 자원 ───────────── */
+    [PropertyOrder(3)]
+    [ReadOnly, ShowInInspector]
+    public int todayWeatherIdx = 0;
+
+    public event Action OnMinuteTick;
+
+    #endregion
+
+    /* ======================================================================= */
+    #region ▶ 자원
+    /* ======================================================================= */
+
+    [TitleGroup("Resources")]
+    [ReadOnly, ShowInInspector]
     public int Credit { get; private set; }
+
+    [ReadOnly, ShowInInspector]
     public int Popularity { get; private set; }
+
+    [ReadOnly, ShowInInspector]
     public int Reputation { get; private set; }
 
-    public Action<int> OnCreditChanged;
-    public Action<int> OnPopularityChanged;
-    public Action<int> OnReputationChanged;
+    public event Action<int> OnCreditChanged;
+    public event Action<int> OnPopularityChanged;
+    public event Action<int> OnReputationChanged;
 
-    /* ───────────── 감염 ───────────── */
+    #endregion
+
+    /* ======================================================================= */
+    #region ▶ 감염
+    /* ======================================================================= */
+
+    [TitleGroup("Infection")]
+    [ReadOnly, ShowInInspector]
     public int infectionStage = 0;
-    public int nextInfectionUpgradeDay = 14;   // N일 후 +1단계
 
-    /* ───────────── 크리쳐 ───────────── */
+    [ReadOnly, ShowInInspector]
+    public int nextInfectionUpgradeDay = 14;
+
+    #endregion
+
+    /* ======================================================================= */
+    #region ▶ 크리처
+    /* ======================================================================= */
+
+    [TitleGroup("Creatures")]
+    [ShowInInspector]
     public readonly List<string> ownedCreatures = new();
+
+    [ShowInInspector]
     public readonly List<string> exhibitedToday = new();
 
-    /* ───────────── 성과 & 점수 ───────────── */
+    #endregion
+
+    /* ======================================================================= */
+    #region ▶ 성과
+    /* ======================================================================= */
+
+    [TitleGroup("Score")]
+    [ReadOnly, ShowInInspector]
     public int totalScore { get; set; }
+
+    [ReadOnly, ShowInInspector]
     public int successCount { get; set; }
+
+    [ReadOnly, ShowInInspector]
     public int failureCount { get; set; }
+
+    #endregion
 
     /* ======================================================================= */
     #region ▶ 초기화 & 리셋
@@ -49,7 +108,8 @@ public class GameStateData : MonoBehaviour
     private void Awake()
     {
         if (I != null && I != this) { Destroy(gameObject); return; }
-        I = this; DontDestroyOnLoad(gameObject);
+        I = this;
+        DontDestroyOnLoad(gameObject);
 
         ResetGameState();
     }
@@ -62,13 +122,11 @@ public class GameStateData : MonoBehaviour
             Debug.LogError("[GameStateData] GameManager.Instance.CFG 가 null 입니다!");
             return;
         }
+
         currentDay = 0;
         currentPhase = GamePhase.Title;
-        currentMinutes = 360;
-        if (cfg == null)
-        {
-            Debug.LogError("<GameStateData> GameConfig.asset 을 Resources 폴더에서 찾을 수 없습니다!");
-        }
+        currentMinutes = 540;
+
         Credit = cfg.initialCredit;
         Popularity = cfg.initialPopularity;
         Reputation = cfg.initialReputation;
@@ -83,81 +141,93 @@ public class GameStateData : MonoBehaviour
         successCount = 0;
         failureCount = 0;
     }
+
     #endregion
 
     /* ======================================================================= */
-    #region ▶ 시간‧기후
+    #region ▶ 시간·기후 관련
     /* ======================================================================= */
+
     public void AdvanceMinutes(int min)
     {
         currentMinutes = (currentMinutes + min) % 1440;
         OnMinuteTick?.Invoke();
     }
-    public void RollNewWeather(int idx) => todayWeatherIdx = idx;
+
+    public void RollNewWeather(int idx)
+    {
+        todayWeatherIdx = idx;
+    }
+
     #endregion
 
     /* ======================================================================= */
-    #region ▶ 자원 변경
+    #region ▶ 자원 관련
     /* ======================================================================= */
+
     public void AddCredit(int amount)
     {
         Credit += amount;
         OnCreditChanged?.Invoke(Credit);
     }
+
     public void AddPopularity(int delta)
     {
         Popularity += delta;
         OnPopularityChanged?.Invoke(Popularity);
     }
+
     public void AddReputation(int delta)
     {
         Reputation += delta;
         OnReputationChanged?.Invoke(Reputation);
     }
+
     #endregion
 
     /* ======================================================================= */
-    #region ▶ 크리쳐 관리
+    #region ▶ 크리처 관련
     /* ======================================================================= */
+
     public void AddOwnedCreature(string id)
     {
         if (!ownedCreatures.Contains(id))
             ownedCreatures.Add(id);
     }
+
     public void AddExhibitedCreature(string id)
     {
         if (!exhibitedToday.Contains(id))
             exhibitedToday.Add(id);
     }
+
     #endregion
 
     /* ======================================================================= */
     #region ▶ 낮/밤 전환 & 감염 진행
     /* ======================================================================= */
+
     public void StartNewDay()
     {
         currentDay++;
         currentPhase = GamePhase.Day;
         exhibitedToday.Clear();
 
-        /* 감염 단계 체크 */
         if (currentDay >= nextInfectionUpgradeDay)
         {
-            infectionStage = Mathf.Min(
-                infectionStage + 1,
-                Resources.Load<GameConfig>("GameConfig").maxInfectionStage
-            );
-            nextInfectionUpgradeDay +=
-                Resources.Load<GameConfig>("GameConfig").infectionStagePeriodDays;
+            var cfg = Resources.Load<GameConfig>("GameConfig");
+            infectionStage = Mathf.Min(infectionStage + 1, cfg.maxInfectionStage);
+            nextInfectionUpgradeDay += cfg.infectionStagePeriodDays;
         }
     }
+
     #endregion
 
     /* ======================================================================= */
-    #region ▶ 성과 집계 (낮 결과·실패)
+    #region ▶ 성과 집계
     /* ======================================================================= */
-    public void ApplyDayResults(int earnCredit, int earnPopularity,
-                                int deltaReputation, int earnedScore)
+
+    public void ApplyDayResults(int earnCredit, int earnPopularity, int deltaReputation, int earnedScore)
     {
         AddCredit(earnCredit);
         AddPopularity(earnPopularity);
@@ -174,5 +244,6 @@ public class GameStateData : MonoBehaviour
         failureCount += 1;
         OnReputationChanged?.Invoke(Reputation);
     }
+
     #endregion
 }

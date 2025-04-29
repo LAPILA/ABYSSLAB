@@ -3,27 +3,40 @@ using UnityEngine.UI;
 using TMPro;
 using System.Collections;
 using UnityEngine.InputSystem;
+using Sirenix.OdinInspector;
 
 public class UIManagerDay : MonoBehaviour
 {
-    /* ───── 싱글톤 ───── */
     public static UIManagerDay I { get; private set; }
 
-    /* ───── UI 슬롯 ───── */
-    [Header("Text Slots")]
+    [FoldoutGroup("Main UI")]
+
+    [FoldoutGroup("Main UI/Texts")]
+    [Required]
     [SerializeField] private Text creditText;
+
+    [FoldoutGroup("Main UI/Texts")]
+    [Required]
     [SerializeField] private Text dayText;
+
+    [FoldoutGroup("Main UI/Texts")]
+    [Required]
     [SerializeField] private Text clockText;
 
-    [Header("Weather")]
+    [FoldoutGroup("Main UI/Weather")]
+    [Required]
     [SerializeField] private Image weatherIcon;
-    private Sprite[] _weatherIcons;
 
-    [Header("Night Mode Prompt")]
-    [SerializeField] private GameObject nightPromptUI;    // 'Hold to change phase' 안내창
+    [FoldoutGroup("Main UI/Night Prompt")]
+    [Required]
+    [SerializeField] private GameObject nightPromptUI;
+
+    [FoldoutGroup("Main UI/Night Prompt")]
+    [Required]
     [SerializeField] private Scrollbar holdProgressBar;
 
     /* ───── 내부 상태 ───── */
+    private Sprite[] _weatherIcons;
     private bool nightPromptActive = false;
     private Coroutine holdCoroutine = null;
     private IA_Player _inputActions;
@@ -57,9 +70,6 @@ public class UIManagerDay : MonoBehaviour
         }
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  초기 호출 : 낮 씬 로드 직후 GameManager가 호출                         */
-    /* ---------------------------------------------------------------------- */
     public void InitUI(int today)
     {
         _weatherIcons = _cfg.weatherIcons;
@@ -76,10 +86,7 @@ public class UIManagerDay : MonoBehaviour
         holdProgressBar.size = 0f;
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  날짜, 크레딧, 날씨 갱신                                               */
-    /* ---------------------------------------------------------------------- */
-    public void UpdateDay(int day) =>
+    private void UpdateDay(int day) =>
         dayText.text = $"DAY {day:00}";
 
     private void UpdateCredit(int value) =>
@@ -91,30 +98,21 @@ public class UIManagerDay : MonoBehaviour
         weatherIcon.sprite = _weatherIcons[idx];
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  시계 갱신 (GameStateData 기반)                                         */
-    /* ---------------------------------------------------------------------- */
     private void RefreshClock()
     {
         int minutes = GameStateData.I.currentMinutes;
         int h24 = minutes / 60;
         int m = minutes % 60;
-
         bool isAM = h24 < 12;
         int h12 = h24 % 12; if (h12 == 0) h12 = 12;
-
         clockText.text = $"{h12:00}:{m:00} {(isAM ? "AM" : "PM")}";
 
-        // 🌙 오후 6시(18:00, 1080분) 넘으면 프롬프트 활성화
         if (!nightPromptActive && minutes >= 1080)
         {
             ActivateNightPrompt();
         }
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  밤 시작 안내 프롬프트 활성화                                           */
-    /* ---------------------------------------------------------------------- */
     private void ActivateNightPrompt()
     {
         nightPromptActive = true;
@@ -122,9 +120,6 @@ public class UIManagerDay : MonoBehaviour
         holdProgressBar.size = 0f;
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  InputAction: E 키 누름/뗌                                               */
-    /* ---------------------------------------------------------------------- */
     private void OnInteractStarted(InputAction.CallbackContext ctx)
     {
         if (!nightPromptActive) return;
@@ -143,9 +138,6 @@ public class UIManagerDay : MonoBehaviour
         }
     }
 
-    /* ---------------------------------------------------------------------- */
-    /*  E 키 홀드 감지 코루틴                                                  */
-    /* ---------------------------------------------------------------------- */
     private IEnumerator HoldToStartNight()
     {
         float holdTime = 0f;
@@ -158,7 +150,6 @@ public class UIManagerDay : MonoBehaviour
             yield return null;
         }
 
-        // 완료: 밤 시작
         nightPromptUI?.SetActive(false);
         TimeManager.Instance.ForceEndPhase();
     }

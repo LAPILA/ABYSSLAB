@@ -1,33 +1,49 @@
-//==============================================================================
+ï»¿//==============================================================================
 // TimeManager
-//  Çö½Ç 1ÃÊ´ç °ÔÀÓ ³» ºĞ ¼ö ´©Àû (°¡»ó ½Ã°è)
-//  ³·/¹ã ÆäÀÌÁî Å¸ÀÌ¸Ó ÁøÇà & UI °»½Å ÀÌº¥Æ®(OnTimeUpdate)
-//  ÆäÀÌÁî Á¾·á ½Ã OnDayEnd / OnNightEnd ÀÌº¥Æ® ¹ß»ı
+// - í˜„ì‹¤ 1ì´ˆë‹¹ ê²Œì„ ë‚´ ë¶„ ìˆ˜ ëˆ„ì  (ê°€ìƒ ì‹œê³„)
+// - ë‚®/ë°¤ í˜ì´ì¦ˆ íƒ€ì´ë¨¸ ì§„í–‰ & UI ê°±ì‹  ì´ë²¤íŠ¸ (OnTimeUpdate)
+// - í˜ì´ì¦ˆ ì¢…ë£Œ ì‹œ OnDayEnd / OnNightEnd ì´ë²¤íŠ¸ ë°œìƒ
 //==============================================================================
 
 using System;
 using System.Collections;
 using UnityEngine;
+using UnityEditor;
+using Sirenix.OdinInspector;
 
+[DefaultExecutionOrder(-90)]
 public class TimeManager : MonoBehaviour
 {
     public static TimeManager Instance { get; private set; }
 
-    // ÆäÀÌÁî Å¸ÀÌ¸Ó
-    private float _phaseTimer;
-    private float _phaseDuration;
-    private bool _isDayPhase;
-    private bool _isPhaseRunning;
+    /* ======================================================================= */
+    #region â–¶ ëŸ°íƒ€ì„ íƒ€ì´ë¨¸ ìƒíƒœ
+    /* ======================================================================= */
+    [BoxGroup("Runtime Timer")]
+    [BoxGroup("Runtime Timer/Phase Timer")]
+    [ReadOnly, ShowInInspector]
+    private bool _isDayPhase = true;
 
-    // °¡»ó ½Ã°è ´©Àû
+    [BoxGroup("Runtime Timer/Phase Timer")]
+    [ReadOnly, ShowInInspector]
+    private bool _isPhaseRunning = true;
+
+    [BoxGroup("Runtime Timer/Clock")]
+    [ReadOnly, ShowInInspector]
     private float _accumClock;
+    #endregion
 
-    /// <summary>1ºĞ ´ÜÀ§ Èå¸§À» UI¿¡ ¾Ë¸± ¶§</summary>
-    public event Action<float, float> OnTimeUpdate;
-    /// <summary>³· ÆäÀÌÁî°¡ ³¡³µÀ» ¶§</summary>
+    /* ======================================================================= */
+    #region â–¶ ì´ë²¤íŠ¸
+    /* ======================================================================= */
+
+    public event Action<float, float> OnTimeUpdate; // (ë‚¨ì€ì‹œê°„, ì „ì²´ì‹œê°„)
     public event Action OnDayEnd;
-    /// <summary>¹ã ÆäÀÌÁî°¡ ³¡³µÀ» ¶§</summary>
     public event Action OnNightEnd;
+    #endregion
+    /* ======================================================================= */
+    #region â–¶ ìœ ë‹ˆí‹° ìƒëª…ì£¼ê¸°
+    /* ======================================================================= */
 
     private void Awake()
     {
@@ -36,65 +52,98 @@ public class TimeManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
     }
 
+    /// <summary>
+    /// ë‚®/ë°¤ í˜ì´ì¦ˆ íƒ€ì´ë¨¸ ì‹œì‘
+    /// </summary>
+    public void StartPhaseTimer(bool isDay)
+    {
+        _isDayPhase = isDay;
+        _isPhaseRunning = true;
+    }
+
+    /// <summary>
+    /// ë‚®/ë°¤ ì‹œê°„ ì²´í¬ (Updateì—ì„œ ë§¤í”„ë ˆì„ í˜¸ì¶œ)
+    /// </summary>
     private void Update()
     {
-        // 1) °¡»ó ½Ã°è: ¸Å 1ÃÊ¸¶´Ù minutesPerRealSecond ¸¸Å­ GameStateData¿¡ ¾Ë¸²
+        if (!_isPhaseRunning)
+            return;
+
         _accumClock += Time.deltaTime;
         if (_accumClock >= 1f)
         {
-            GameStateData.I.AdvanceMinutes(GameManager.Instance.CFG.minutesPerRealSecond);
             _accumClock -= 1f;
+
+            var current = GameStateData.I.currentMinutes;
+            var cfg = GameManager.Instance.CFG;
+
+            if (_isDayPhase)
+            {
+                if (current >= cfg.dayStartMinutes && current < cfg.dayEndMinutes)
+                {
+                    GameStateData.I.AdvanceMinutes(cfg.minutesPerRealSecond);
+                }
+                else
+                {
+                    _isPhaseRunning = false;
+                    Debug.Log("ë‚® ì˜ì—… ì¢…ë£Œ - ëŒ€ê¸° ìƒíƒœ ì§„ì… (Eí‚¤ ëŒ€ê¸°)");
+                }
+            }
+            else
+            {
+                bool isInNightTime =
+                    (current >= cfg.nightStartMinutes && current < 1440) ||
+                    (current >= 0 && current < cfg.nightEndMinutes);
+
+                if (isInNightTime)
+                {
+                    GameStateData.I.AdvanceMinutes(cfg.minutesPerRealSecond);
+                }
+                else
+                {
+                    _isPhaseRunning = false;
+                    Debug.Log("ë°¤ ì¢…ë£Œ - ìë™ ë‚® ì „í™˜");
+                    GameManager.Instance.ChangePhase(GamePhase.Day);
+                }
+            }
         }
     }
 
-    /// <summary>
-    /// ³·/¹ã ÆäÀÌÁî Å¸ÀÌ¸Ó ½ÃÀÛ
-    /// </summary>
-    /// <param name="isDay">true=³·, false=¹ã</param>
-    /// <param name="duration">ÃÊ ´ÜÀ§ Áö¼Ó½Ã°£</param>
-    public void StartPhaseTimer(bool isDay, float duration)
-    {
-        _isDayPhase = isDay;
-        _phaseDuration = duration;
-        _phaseTimer = duration;
-        _isPhaseRunning = true;
 
-        StartCoroutine(PhaseTimerCoroutine());
-    }
-
-    private IEnumerator PhaseTimerCoroutine()
-    {
-        while (_isPhaseRunning && _phaseTimer > 0f)
-        {
-            _phaseTimer -= Time.deltaTime;
-
-            OnTimeUpdate?.Invoke(_phaseTimer, _phaseDuration);
-
-            yield return null;
-        }
-
-        _isPhaseRunning = false;
-
-        if (_isDayPhase) OnDayEnd?.Invoke();
-        else OnNightEnd?.Invoke();
-    }
+    #endregion
+    /* ======================================================================= */
+    #region â–¶ í˜ì´ì¦ˆ ì¢…ë£Œ
+    /* ======================================================================= */
 
     /// <summary>
-    /// Áß°£¿¡ Áï½Ã ÆäÀÌÁî¸¦ ³¡³»°í ½ÍÀ» ¶§ (µğ¹ö±× / ¹öÆ° µî)
+    /// ê°•ì œë¡œ í˜ì´ì¦ˆë¥¼ ì¦‰ì‹œ ì¢…ë£Œ
     /// </summary>
     public void ForceEndPhase()
     {
-        _phaseTimer = 0f;
-        StopAllCoroutines(); // È¤½Ã ÀÌÀü Å¸ÀÌ¸Ó ·çÇÁ°¡ ³²¾ÆÀÖ´Ù¸é Á¤Áö
+        StopAllCoroutines();
         StartCoroutine(EndPhaseNow());
     }
 
     private IEnumerator EndPhaseNow()
     {
-        yield return null; // ´ÙÀ½ ÇÁ·¹ÀÓ±îÁö ±â´Ù¸²
+        yield return null;
         _isPhaseRunning = false;
 
         if (_isDayPhase) OnDayEnd?.Invoke();
         else OnNightEnd?.Invoke();
     }
+
+    #endregion
+
+    /* ======================================================================= */
+    #region â–¶ DEBUG
+    /* ======================================================================= */
+    [Button("ê²Œì„ ì‹œê°„ +60ë¶„ (ë””ë²„ê·¸ìš©)")]
+    private void Debug_Add10Minutes()
+    {
+        GameStateData.I.AdvanceMinutes(60);
+        Debug.Log($"[ë””ë²„ê·¸] ê²Œì„ ì‹œê°„ +60ë¶„ â†’ í˜„ì¬: {GameStateData.I.currentMinutes}ë¶„");
+    }
+    /* ======================================================================= */
+    #endregion
 }
