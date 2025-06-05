@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
+using ALWeapon;
 using Sirenix.OdinInspector;
 
 public class UIManagerNight : MonoBehaviour
@@ -51,7 +52,21 @@ public class UIManagerNight : MonoBehaviour
         GameStateData.I.OnMinuteTick += RefreshClock;
         TimeManager.Instance.OnTimeUpdate += CheckAutoDayTransition;
 
+        // MEMO :: 웨폰 매니저의 핸들러한테도 구독하는 내용 추가해야함.
+        // 다만 접근 방식을 어떻게 할지 정해야할듯? 싱글턴이니까 그냥 접근하게 둬도 되긴 할텐데 레이스 걸리는지에 대해선 확인 해봐야함.
+
         hasAutoPhaseTriggered = false;
+    }
+
+    // 웨폰 UI 분리하여 관리?
+    private void UpdateSelectedWeapon(WeaponBase NewWeapon)
+    {
+        // 아이콘 등.. 업데이트
+    }
+
+    private void UpdateWeaponStatus(WeaponBase NewWeapon)
+    {
+        // 잔탄 등.. 업데이트
     }
 
     private void UpdateDay(int day) =>
