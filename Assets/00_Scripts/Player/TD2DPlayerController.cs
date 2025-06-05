@@ -1,5 +1,5 @@
 //==============================================================================
-// TD2DPlayerController (Odin Inspector + µð¹ö±× ¹öÆ° ¹öÀü)
+// TD2DPlayerController (Odin Inspector + ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ° ï¿½ï¿½ï¿½ï¿½)
 //==============================================================================
 
 using UnityEngine;
@@ -24,7 +24,7 @@ public class TD2DPlayerController : MonoBehaviour
     [LabelText("Walk Start Animation")] public string walkStartAnim = "walkstart";
 
     [BoxGroup("Spine")]
-    [Range(0f, 1f)][LabelText("Start ¡æ Walk Blend Time")] public float startBlendTime = 0.1f;
+    [Range(0f, 1f)][LabelText("Start ï¿½ï¿½ Walk Blend Time")] public float startBlendTime = 0.1f;
 
     private Spine.AnimationState animState;
     private bool wasMoving;
@@ -84,14 +84,14 @@ public class TD2DPlayerController : MonoBehaviour
     private Vector2 moveInput;
     private Rigidbody rb;
 
-    // ===== µð¹ö±×¿ë ¹öÆ° =====
+    // ===== ï¿½ï¿½ï¿½ï¿½×¿ï¿½ ï¿½ï¿½Æ° =====
     [Title("Debug Actions")]
     [BoxGroup("Debug Actions")]
     [Button("Reset to Spawn Position")]
     private void ResetPlayerPosition()
     {
         transform.position = _spawnPosition;
-        rb.velocity = Vector3.zero;
+        rb.linearVelocity = Vector3.zero;
         Debug.Log("[DEBUG] Player Reset to Spawn Position");
     }
 
@@ -200,7 +200,7 @@ public class TD2DPlayerController : MonoBehaviour
         float speed = isSprinting ? sprintSpeed : walkSpeed;
         Vector3 targetVelocity = inputVec * speed;
 
-        Vector3 velocity = rb.velocity;
+        Vector3 velocity = rb.linearVelocity;
         Vector3 velocityChange = targetVelocity - velocity;
         velocityChange.y = 0f;
 
