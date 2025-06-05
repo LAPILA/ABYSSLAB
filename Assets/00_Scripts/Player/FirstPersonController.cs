@@ -454,7 +454,7 @@ public class FirstPersonController : MonoBehaviour
 
         targetVelocity = transform.TransformDirection(targetVelocity) * currentSpeed;
 
-        Vector3 velocity = rb.velocity;
+        Vector3 velocity = rb.linearVelocity;
         Vector3 velocityChange = targetVelocity - velocity;
         velocityChange.x = Mathf.Clamp(velocityChange.x, -maxVelocityChange, maxVelocityChange);
         velocityChange.z = Mathf.Clamp(velocityChange.z, -maxVelocityChange, maxVelocityChange);
