@@ -9,6 +9,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
+using Unity.Cinemachine;
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -24,7 +26,7 @@ public class FirstPersonController : MonoBehaviour
     // We'll subscribe to events in OnEnable()
 
     [Header("References")]
-    public Camera playerCamera;
+    public CinemachineCamera playerCamera;
     private Rigidbody rb;
 
     [Header("Camera Settings")]
@@ -51,6 +53,8 @@ public class FirstPersonController : MonoBehaviour
     // Internals
     private float yawRaw, pitchRaw;
     private float yawSmooth, pitchSmooth;
+
+    private static bool bMove = true;
 
     #region Zoom
     [Header("Zoom Settings")]
@@ -166,7 +170,7 @@ public class FirstPersonController : MonoBehaviour
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        if (playerCamera) playerCamera.fieldOfView = fov;
+        if (playerCamera) playerCamera.Lens.FieldOfView = fov;
 
         originalScale = transform.localScale;
         targetScaleY = originalScale.y;
@@ -284,7 +288,7 @@ public class FirstPersonController : MonoBehaviour
 
     private void Update()
     {
-        if (!playerCanMove) return;
+        if (!playerCanMove || !bMove) return;
 
         // Camera look
         if (cameraCanMove && playerCamera)
@@ -318,8 +322,17 @@ public class FirstPersonController : MonoBehaviour
     private void FixedUpdate()
     {
         // Movement
-        if (playerCanMove)
+        if (playerCanMove && bMove)
             HandleMovement();
+    }
+
+    public void StartMove()
+    {
+        bMove = true;
+}
+    public void StopMove()
+    {
+        bMove = false;
     }
 
     #endregion
@@ -485,7 +498,7 @@ public class FirstPersonController : MonoBehaviour
             if (playerCamera)
             {
                 float target = sprintFOV;
-                playerCamera.fieldOfView = Mathf.Lerp(playerCamera.fieldOfView, target, sprintFOVStepTime * Time.deltaTime);
+                playerCamera.Lens.FieldOfView = Mathf.Lerp(playerCamera.Lens.FieldOfView, target, sprintFOVStepTime * Time.deltaTime);
             }
         }
         else
@@ -499,7 +512,7 @@ public class FirstPersonController : MonoBehaviour
             // revert FOV if not zoom
             if (playerCamera && !isZoomed)
             {
-                playerCamera.fieldOfView = Mathf.Lerp(playerCamera.fieldOfView, fov, sprintFOVStepTime * Time.deltaTime);
+                playerCamera.Lens.FieldOfView = Mathf.Lerp(playerCamera.Lens.FieldOfView, fov, sprintFOVStepTime * Time.deltaTime);
             }
         }
 
@@ -623,7 +636,7 @@ public class FirstPersonController : MonoBehaviour
             }
         }
         float targetFOV = (isZoomed) ? zoomFOV : fov;
-        playerCamera.fieldOfView = Mathf.Lerp(playerCamera.fieldOfView, targetFOV, zoomStepTime * Time.deltaTime);
+        playerCamera.Lens.FieldOfView = Mathf.Lerp(playerCamera.Lens.FieldOfView, targetFOV, zoomStepTime * Time.deltaTime);
     }
 
     #endregion

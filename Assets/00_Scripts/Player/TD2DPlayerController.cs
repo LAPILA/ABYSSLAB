@@ -1,5 +1,5 @@
 //==============================================================================
-// TD2DPlayerController (Odin Inspector + ����� ��ư ����)
+// TD2DPlayerController (Odin Inspector + �����?��ư ����)
 //==============================================================================
 
 using UnityEngine;
@@ -84,7 +84,7 @@ public class TD2DPlayerController : MonoBehaviour
     private Vector2 moveInput;
     private Rigidbody rb;
 
-    // ===== ����׿� ��ư =====
+    // ===== ����׿�?��ư =====
     [Title("Debug Actions")]
     [BoxGroup("Debug Actions")]
     [Button("Reset to Spawn Position")]
