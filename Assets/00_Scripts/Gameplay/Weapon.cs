@@ -8,6 +8,7 @@ using System.Collections;
 using UnityEngine;
 using Sirenix.OdinInspector;
 
+// ====== DEPRECATED ======
 namespace ALWeapon
 {
     [DefaultExecutionOrder(-90)]
