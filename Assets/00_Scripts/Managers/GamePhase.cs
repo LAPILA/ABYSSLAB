@@ -9,5 +9,7 @@ public enum GamePhase
     Event,
     Result,
     Transition,
-    Title
+    Title,
+    Tutorial,
+    GameOver
 }

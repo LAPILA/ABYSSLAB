@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using DG.Tweening;
 using Sirenix.OdinInspector;
 using Unity.Cinemachine;
+using System;
 
 public class CCTVManager : MonoBehaviour
 {
@@ -160,23 +161,50 @@ public class CCTVManager : MonoBehaviour
 
     public void SwitchToCamera(int index)
     {
-        if (index < 0 || index >= cameraUnits.Count) return;
-
-        currentIndex = index;
-        var unit = cameraUnits[index];
-        var room = unit.TargetRoom;
-        bool isCamDisabled = !room.CCTVEnabled;
-
-        PlayTransitionEffect(() =>
+        try
         {
-            virtualCam.Follow = unit.ViewPoint;
-            virtualCam.LookAt = unit.ViewPoint;
-            cctvScreen.texture = isCamDisabled ? defaultRenderTexture : unit.OutputTexture;
+            if (cameraUnits == null || cameraUnits.Count == 0)
+            {
+                Debug.LogWarning("카메라 유닛 없음!");
+                return;
+            }
+            if (index < 0 || index >= cameraUnits.Count)
+            {
+                Debug.LogWarning("잘못된 카메라 인덱스");
+                return;
+            }
 
-            cameraNameText.text = $"CAMERA - {unit.RoomID}";
-            UpdateRoomStatusUI(room);
-            transitionEffectObject?.SetActive(isCamDisabled);
-        });
+            currentIndex = index;
+            var unit = cameraUnits[index];
+            if (unit == null || unit.ViewPoint == null)
+            {
+                Debug.LogWarning("카메라 유닛 또는 뷰포인트가 null!");
+                return;
+            }
+            var room = unit.TargetRoom;
+            bool isCamDisabled = !room.CCTVEnabled;
+
+            PlayTransitionEffect(() =>
+            {
+                if (virtualCam != null && unit.ViewPoint != null)
+                {
+                    virtualCam.Follow = unit.ViewPoint;
+                    virtualCam.LookAt = unit.ViewPoint;
+                }
+                if (cctvScreen != null)
+                    cctvScreen.texture = (isCamDisabled ? defaultRenderTexture : unit.OutputTexture);
+                if (cameraNameText != null)
+                    cameraNameText.text = $"CAMERA - {unit.RoomID}";
+                if (room != null)
+                    UpdateRoomStatusUI(room);
+                if (transitionEffectObject != null)
+                    transitionEffectObject.SetActive(isCamDisabled);
+            });
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("CCTV 콜백 예외: " + e);
+        }
     }
 
     private void UpdateRoomStatusUI(RoomBound room)
