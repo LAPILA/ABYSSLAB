@@ -5,170 +5,163 @@ using UnityEngine.SceneManagement;
 using DG.Tweening;
 using Sirenix.OdinInspector;
 
-/// <summary>
-/// 게임 전체 메인 흐름 및 페이즈/씬 제어, 페이드 연출 담당 (싱글톤)
-/// </summary>
 [DefaultExecutionOrder(-100)]
 public class GameManager : SerializedMonoBehaviour
 {
+    /* ──────────────────────────────────────────────
+     * Singleton
+     * ────────────────────────────────────────────── */
     public static GameManager Instance { get; private set; }
 
-    // === Config/상태 참조 ===
+    /* ──────────────────────────────────────────────
+     * Config
+     * ────────────────────────────────────────────── */
     [Title("Core Settings")]
-    [BoxGroup("Core"), Required, Tooltip("게임 설정 ScriptableObject")]
-    [SerializeField] private GameConfig gameConfig;
+    [BoxGroup("Core"), Required][SerializeField] private GameConfig gameConfig;
     public GameConfig CFG => gameConfig;
 
-    [Title("페이드 연출")]
-    [BoxGroup("Fade"), Required, Tooltip("전체 화면 페이드 CanvasGroup")]
-    [SerializeField] private CanvasGroup fadeCanvasGroup;
+    [Title("Fade")]
+    [BoxGroup("Fade"), Required][SerializeField] private CanvasGroup fadeCanvasGroup;
 
-    // === 런타임 상태 ===
+    /* ──────────────────────────────────────────────
+     * Runtime State
+     * ────────────────────────────────────────────── */
     [Title("Runtime State")]
-    [BoxGroup("Runtime")]
-    [ReadOnly, ShowInInspector]
+    [BoxGroup("Runtime"), ReadOnly, ShowInInspector]
     public GamePhase CurrentPhase { get; private set; } = GamePhase.None;
 
-    [BoxGroup("Runtime")]
-    [ReadOnly, ShowInInspector]
+    [BoxGroup("Runtime"), ReadOnly, ShowInInspector]
     public int CurrentDay => GameStateData.I?.currentDay ?? 1;
 
-    // === 페이즈 변경 이벤트 ===
-    public event Action<GamePhase> OnPhaseChanged;
+    [BoxGroup("Runtime"), ReadOnly, ShowInInspector]
+    public DeepSeaWeatherData TodayWeather => GameStateData.I?.TodayWeatherData;
 
-    // ===== 초기화 =====
+    [Title("Boot")]
+    [EnumToggleButtons] public GamePhase initialPhase = GamePhase.Title;
+
+    /* ──────────────────────────────────────────────
+     * Events
+     * ────────────────────────────────────────────── */
+    /// <summary>Prev, Next</summary>
+    public event Action<GamePhase, GamePhase> OnPhaseChanged;
+
+    /* ──────────────────────────────────────────────
+     * Life-cycle
+     * ────────────────────────────────────────────── */
     private void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
-        Instance = this;
-        DontDestroyOnLoad(gameObject);
+        Instance = this; DontDestroyOnLoad(gameObject);
 
-        if (fadeCanvasGroup != null)
-            fadeCanvasGroup.alpha = 0f;
+        if (fadeCanvasGroup != null) fadeCanvasGroup.alpha = 0f;
     }
 
-    private void Start()
-    {
-        StartCoroutine(DelayedStart());
-    }
+    private void Start() => StartCoroutine(CoDelayedBoot());
 
-    private IEnumerator DelayedStart()
+    private IEnumerator CoDelayedBoot()
     {
         yield return new WaitForSeconds(CFG.startDelay);
-        // 시작시 Title 씬/페이즈로 진입
-        ChangePhase(GamePhase.Title);
+        ChangePhase(initialPhase);   // 첫 진입 Need FIX : 테스트용이라 이후 Title로 픽스
     }
 
-    // ===== 페이즈 전환 =====
-    public void ChangePhase(GamePhase nextPhase)
+    /* ──────────────────────────────────────────────
+     * Public : Phase 변경
+     * ────────────────────────────────────────────── */
+    public void ChangePhase(GamePhase next)
     {
-        // 상태 동기화
-        CurrentPhase = nextPhase;
-        if (GameStateData.I != null)
-            GameStateData.I.currentPhase = nextPhase;
+        if (next == CurrentPhase) return;                          // 동일 페이즈 무시
+        var prev = CurrentPhase; CurrentPhase = next;
+        if (GameStateData.I) GameStateData.I.currentPhase = next;  // 상태 동기화
 
-        // (디버깅/테스트용 로그)
-        Debug.Log($"[GameManager] ChangePhase: {nextPhase}");
+        Debug.Log($"[GM] Phase  {prev}  ➜  {next}");
 
-        // === 씬 결정 ===
-        string targetScene = nextPhase switch
+        /* ─ Scene 결정 ─ */
+        string targetScene = next switch
         {
             GamePhase.Day => CFG.daySceneName,
             GamePhase.Night => CFG.nightSceneName,
             GamePhase.Title => CFG.titleSceneName,
-            GamePhase.Result => CFG.daySceneName,      // 필요시 별도 씬 지정
-            GamePhase.Tutorial => CFG.daySceneName,      // 필요시 별도 씬 지정
-            GamePhase.Event => CFG.daySceneName,      // 필요시 별도 씬 지정
-            GamePhase.GameOver => CFG.titleSceneName,    // 필요시 GameOver 씬 지정
+            GamePhase.Result => CFG.daySceneName,
+            GamePhase.Tutorial => CFG.tutorialSceneName,
+            GamePhase.Event => CFG.daySceneName,
+            GamePhase.GameOver => CFG.titleSceneName,
             _ => CFG.daySceneName,
         };
 
-        // === 씬 전환 ===
-        StartCoroutine(TransitionScene(targetScene, nextPhase));
-
-        // === 외부 시스템 이벤트 트리거 ===
-        OnPhaseChanged?.Invoke(nextPhase);
+        StartCoroutine(CoTransitionScene(targetScene, prev, next));
+        OnPhaseChanged?.Invoke(prev, next);
     }
 
-    // ===== 씬 전환 및 후처리 Hook =====
-    private IEnumerator TransitionScene(string sceneName, GamePhase phase)
+    /* ──────────────────────────────────────────────
+     *  ▷ Coroutine : Scene Transition
+     * ────────────────────────────────────────────── */
+    private IEnumerator CoTransitionScene(string sceneName, GamePhase prev, GamePhase next)
     {
-        // 1. 페이드아웃
-        if (fadeCanvasGroup != null)
-            yield return fadeCanvasGroup.DOFade(1f, CFG.fadeDuration).WaitForCompletion();
+        /* 1. Fade Out */
+        if (fadeCanvasGroup) yield return fadeCanvasGroup.DOFade(1, CFG.fadeDuration).WaitForCompletion();
 
-        // 2. 씬 로드 (이미 로딩중인 경우 방지)
+        /* 2. Load Scene (필요 시) */
         if (SceneManager.GetActiveScene().name != sceneName)
             yield return SceneManager.LoadSceneAsync(sceneName);
 
-        // 3. 페이즈별 후처리
-        switch (phase)
+        /* 3. GameStateData 초기화 */
+        if (GameStateData.I)
         {
-            case GamePhase.Day: OnDaySceneLoaded(); break;
-            case GamePhase.Night: OnNightSceneLoaded(); break;
-            case GamePhase.Title: OnTitleSceneLoaded(); break;
-            case GamePhase.Result: OnResultSceneLoaded(); break;
-            case GamePhase.Tutorial: OnTutorialSceneLoaded(); break;
-            case GamePhase.Event: OnEventSceneLoaded(); break;
+            switch (next)
+            {
+                case GamePhase.Day: GameStateData.I.StartNewDay(); break;
+                case GamePhase.Night: GameStateData.I.StartNight(); break;
+                case GamePhase.Title: GameStateData.I.ResetGameState(); break;
+            }
+        }
+
+        /* 4. Phase별 After-Load Hook */
+        switch (next)
+        {
+            case GamePhase.Day: OnDayLoaded(); break;
+            case GamePhase.Night: OnNightLoaded(); break;
+            case GamePhase.Title: OnTitleLoaded(); break;
+            case GamePhase.Result: OnResultLoaded(); break;
+            case GamePhase.Tutorial: OnTutorialLoaded(); break;
+            case GamePhase.Event: OnEventLoaded(); break;
             case GamePhase.GameOver: OnGameOverLoaded(); break;
         }
 
-        // 4. 페이드인
-        if (fadeCanvasGroup != null)
-            yield return fadeCanvasGroup.DOFade(0f, CFG.fadeDuration).WaitForCompletion();
+        /* 5. Fade In */
+        if (fadeCanvasGroup) yield return fadeCanvasGroup.DOFade(0, CFG.fadeDuration).WaitForCompletion();
     }
 
-    // ===== 페이즈별 AfterLoad Hook (각자 연출/세팅 가능) =====
-    private void OnDaySceneLoaded()
-    {
-        // GameStateData.I.StartNewDay(); // 낮 전용 리셋/처리
-        Debug.Log("[GameManager] DaySceneLoaded");
-    }
-    private void OnNightSceneLoaded()
-    {
-        // GameStateData.I.StartNight(); // 밤 전용 리셋/처리
-        Debug.Log("[GameManager] NightSceneLoaded");
-    }
-    private void OnTitleSceneLoaded()
-    {
-        Debug.Log("[GameManager] TitleSceneLoaded");
-    }
-    private void OnResultSceneLoaded()
-    {
-        Debug.Log("[GameManager] ResultSceneLoaded");
-    }
-    private void OnTutorialSceneLoaded()
-    {
-        Debug.Log("[GameManager] TutorialSceneLoaded");
-    }
-    private void OnEventSceneLoaded()
-    {
-        Debug.Log("[GameManager] EventSceneLoaded");
-    }
-    private void OnGameOverLoaded()
-    {
-        Debug.Log("[GameManager] GameOverLoaded");
-    }
+    /* ──────────────────────────────────────────────
+     *  ▷ Phase-specific Hooks
+     * ────────────────────────────────────────────── */
+    private void OnDayLoaded() => Debug.Log("[GM] Day Scene Loaded");
+    private void OnNightLoaded() => Debug.Log("[GM] Night Scene Loaded");
+    private void OnTitleLoaded() => Debug.Log("[GM] Title Scene Loaded");
+    private void OnResultLoaded() => Debug.Log("[GM] Result Scene Loaded");
+    private void OnTutorialLoaded() => Debug.Log("[GM] Tutorial Scene Loaded");
+    private void OnEventLoaded() => Debug.Log("[GM] Event Scene Loaded");
+    private void OnGameOverLoaded() => Debug.Log("[GM] GameOver Scene Loaded");
 
+    /* ──────────────────────────────────────────────
+     *  ▷ Public : Game Over
+     * ────────────────────────────────────────────── */
     public void GameOver()
     {
-        Debug.Log("[GameManager] GAME OVER!");
+        Debug.Log("[GM] GAME OVER");
         ChangePhase(GamePhase.GameOver);
     }
 
-    // ====== 디버그/QA 편의 버튼 ======
 #if UNITY_EDITOR
-    [Button(ButtonSizes.Large)]
-    [GUIColor(0.9f, 0.8f, 0.4f)]
-    [LabelText("낮/밤 전환 (디버그용)")]
+    /* ────────────── Debug Buttons ────────────── */
+    [Button(ButtonSizes.Large), GUIColor(0.9f, 0.8f, 0.4f)]
     private void ToggleDayNight()
     {
-        if (CurrentPhase == GamePhase.Day)
-            ChangePhase(GamePhase.Night);
-        else if (CurrentPhase == GamePhase.Night)
-            ChangePhase(GamePhase.Day);
-        else
-            Debug.LogWarning("현재 페이즈가 Day/Night가 아닙니다.");
+        if (CurrentPhase == GamePhase.Day) ChangePhase(GamePhase.Night);
+        else if (CurrentPhase == GamePhase.Night) ChangePhase(GamePhase.Day);
+        else Debug.LogWarning("[GM] 현재 페이즈가 Day/Night 아님");
     }
+
+    [Button(ButtonSizes.Large), GUIColor(0.4f, 0.7f, 1f)]
+    private void DebugGameOver() => GameOver();
 #endif
 }

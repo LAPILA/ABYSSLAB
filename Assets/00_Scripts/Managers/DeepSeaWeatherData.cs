@@ -1,35 +1,28 @@
 using UnityEngine;
 using Sirenix.OdinInspector;
-using System.Collections.Generic;
+using System;
 
-public enum WeatherEffectType
-{
-    None,
-    StrongCurrent,   // 심해 격류
-    MicrobeFlux,     // 미생물 증가
-    SeabedQuake,     // 해저 지진
-    ColdCurrent,     // 차가운 조류
-    Thunderstorm,    // 낙뢰
-}
+public enum WeatherEffectType { None, StrongCurrent, MicrobeFlux, SeabedQuake, ColdCurrent, Thunderstorm }
 
 [CreateAssetMenu(menuName = "ABYSS_LAB/DeepSeaWeatherData", fileName = "DeepSeaWeatherData")]
 public class DeepSeaWeatherData : ScriptableObject
 {
-    [Title("기본 정보")]
-    [BoxGroup("기본")]
+    /* ────────────── 메타 ────────────── */
+    [Title("기본 정보"), LabelWidth(90)]
     public string weatherName;
-
-    [BoxGroup("기본")]
-    [TextArea]
-    public string description;
-
-    [BoxGroup("기본")]
+    [TextArea] public string description;
     public Sprite icon;
 
-    [BoxGroup("타입")]
-    public WeatherEffectType effectType;
+    /* ────────────── 시스템 ────────────── */
+    [Title("시스템")]
+    [EnumToggleButtons] public WeatherEffectType effectType = WeatherEffectType.None;
+    [Tooltip("게임 진행도(스토리 챕터) ≥ unlockStage 이후 등장")]
+    public int unlockStage = 0;
+    [Tooltip("값이 클수록 뽑힐 확률 높아짐")]
+    [MinValue(1)]
+    public int weight = 1;
 
-    [BoxGroup("연출")]
-    [Tooltip("게임 시작 시 사운드 효과")]
-    public AudioClip sfx;
+    /* ────────────── 연출 ────────────── */
+    [Title("연출 / 이펙트 Tag")]
+    [TableList] public string[] extraEffects;
 }

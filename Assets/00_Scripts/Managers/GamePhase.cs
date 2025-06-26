@@ -4,12 +4,13 @@
 public enum GamePhase
 {
     None,
-    Day,
-    Night,
-    Event,
-    Result,
-    Transition,
-    Title,
-    Tutorial,
-    GameOver
+    Day,//아침
+    Night,//밤
+    Event,//대사
+    Result,//결과
+    Title, //타이틀
+    Tutorial,//튜토리얼
+    Cutscene,//컷씬
+    Pause,//정지
+    GameOver //게임 오버
 }
