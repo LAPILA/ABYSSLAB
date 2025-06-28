@@ -1,297 +1,209 @@
 ﻿//==============================================================================
-// CCTV 시스템 총괄 매니저
-// - RoomBound와 연동하여 각 방 상태 확인 및 UI 반영
-// - 전환 시 전환 이펙트 지원
-// - 키보드 또는 UI 버튼을 통한 카메라 제어
+// CCTV 시스템 총괄 매니저 ― FIXED v4 (Global Angle Limits)
+// - 모든 카메라가 동일한 Yaw/Pitch 제한을 공유하도록 변경
+// - Slot별 yawLimit / pitchLimit 필드 제거
+// - 추후 "카메라 락" 기믹(몬스터 효과)용 플래그만 자리 마련
 //==============================================================================
 
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
 using System.Collections.Generic;
 using DG.Tweening;
 using Sirenix.OdinInspector;
-using Unity.Cinemachine;
 using System;
+using Unity.Cinemachine;
 
 public class CCTVManager : MonoBehaviour
 {
-    #region 🔧 필드 구성 및 상태
+    // ────────────────── 카메라 슬롯 구조 ──────────────────
+    [System.Serializable]
+    public class CCTVSlot
+    {
+        [HorizontalGroup("Split", Width = 60), LabelText("이름"), Required]
+        public string cameraName;
 
-    public static CCTVManager Instance { get; private set; }
+        [HorizontalGroup("Split"), Required]
+        public Camera cctvCamera;
 
-    [BoxGroup("CCTV Configs")]
-    [SerializeField] private List<CCTVCameraUnit> cameraUnits = new();
-    [BoxGroup("CCTV Configs")]
-    [SerializeField] private RenderTexture defaultRenderTexture;
+        [HorizontalGroup("Split"), Required]
+        public RenderTexture renderTexture;
 
-    [BoxGroup("Room Reference")]
-    [SerializeField] private Transform roomParentRoot;
+        [FoldoutGroup("Room"), LabelText("연결 Room")] public GameObject roomRef;
 
-    [BoxGroup("UI References")]
-    [SerializeField] private GameObject cctvWorldCanvas;
-    [SerializeField] private RawImage cctvScreen;
-    [SerializeField] private Text cameraNameText;
-    [SerializeField] private Image alertIcon;
-    [SerializeField] private Image destroyedIcon;
+        [FoldoutGroup("Room"), LabelText("회전 Pivot (선택)")]
+        public Transform pivot; // 회전 적용 트랜스폼 (null → 카메라 Transform)
 
-    [BoxGroup("Camera Control")]
-    [SerializeField] private CinemachineCamera virtualCam;
-    [SerializeField] private Transform mainRoomViewpoint;
+        /// <summary>실제 회전에 사용될 Transform 반환</summary>
+        public Transform GetPivot() => pivot ? pivot : cctvCamera.transform;
+    }
 
-    [BoxGroup("Input Key Config")]
-    [SerializeField] private KeyCode interactKey = KeyCode.T; 
-    [SerializeField] private KeyCode nextKey = KeyCode.Q;
-    [SerializeField] private KeyCode prevKey = KeyCode.E;
+    // ────────────────── 인스펙터 세팅 ──────────────────
+    [TitleGroup("CCTV Settings"), ListDrawerSettings]
+    [SerializeField, Required] private List<CCTVSlot> cctvList = new();
 
-    [BoxGroup("Runtime")]
+    [TitleGroup("UI & View"), Required]
+    [SerializeField] private RawImage mainCCTVScreen;
+
+    [TitleGroup("UI & View")]
+    [SerializeField] private CanvasGroup fadeEffect;
+
+    [TitleGroup("Player & Cameras")]
     [SerializeField] private FirstPersonController playerController;
-    [SerializeField] private CinemachineCamera playerCam;
+    [SerializeField] private CinemachineCamera playerCam;  // 플레이어 1인칭 카메라
+    [SerializeField] private CinemachineCamera overlayCam; // CCTV 뷰 UI용 (HUD 등)
 
-    [BoxGroup("Transition Effect")]
-    [SerializeField] private GameObject transitionEffectObject;
+    [TitleGroup("Limit Settings"), LabelText("Yaw 제한 (deg)")]
+    [MinMaxSlider(-180f, 180f)] public Vector2 yawLimit = new(-90f, 90f);
 
-    private int currentIndex = -1;
-    private bool isViewing = false;
+    [TitleGroup("Limit Settings"), LabelText("Pitch 제한 (deg)")]
+    [MinMaxSlider(-90f, 90f)] public Vector2 pitchLimit = new(-30f, 30f);
 
-    #endregion
+    [TitleGroup("Runtime"), ShowInInspector, ReadOnly]
+    private int currentCameraIndex = -1;
 
-    #region ▶ Unity Loop
+    [SerializeField] private bool isViewing = false;
 
-    private void Start()
+    [SerializeField, Min(1f), Tooltip("마우스 1px당 회전 속도 (deg/sec)")]
+    private float rotationSpeed = 60f;
+
+    [SerializeField, Tooltip("마우스 Y 반전 여부")]
+    private bool invertY = false;
+
+    // 추후 몬스터 효과: 카메라 고정 플래그 (현재는 항상 false)
+    private bool isCameraLocked = false;
+
+    private float cctvYaw = 0f;   // 누적 값 (deg)
+    private float cctvPitch = 0f; // 누적 값 (deg)
+
+    public Action<int, string> OnCameraSwitched;   // (index, name)
+
+    // ────────────────── 초기화 ──────────────────
+    private void Awake()
     {
-        Instance = this;
-        InitializeRooms();
-        cctvWorldCanvas?.SetActive(false);
-        transitionEffectObject?.SetActive(false);
-    }
-
-    private void Update()
-    {
-        if (Input.GetKeyDown(interactKey))
+        if (cctvList == null || cctvList.Count == 0)
         {
-            if (!isViewing) StartCCTVView(0);
-            else EndCCTVView();
+            Debug.LogError("[CCTVManager] CCTV List is empty!");
+            enabled = false;
+            return;
         }
 
-        if (!isViewing) return;
-
-        if (Input.GetKeyDown(nextKey)) SwitchToCamera((currentIndex + 1) % cameraUnits.Count);
-        else if (Input.GetKeyDown(prevKey)) SwitchToCamera((currentIndex - 1 + cameraUnits.Count) % cameraUnits.Count);
-    }
-
-    #endregion
-
-    #region ▶ 초기화
-
-    private void InitializeRooms()
-    {
-        if (roomParentRoot == null) return;
-
-        RoomBound[] roomBounds = roomParentRoot.GetComponentsInChildren<RoomBound>();
-        cameraUnits.Clear();
-
-        for (int i = 0; i < roomBounds.Length; i++)
+        foreach (var slot in cctvList)
         {
-            var rb = roomBounds[i];
-            var cam = rb.GetComponentInChildren<Camera>();
-            if (cam == null) continue;
-
-            var renderTex = new RenderTexture(1920, 1080, 16);
-            cam.targetTexture = renderTex;
-
-            var unit = new CCTVCameraUnit()
-            {
-                RoomID = i.ToString(),
-                Cam = cam,
-                OutputTexture = renderTex,
-                ViewPoint = cam.transform,
-                TargetRoom = rb
-            };
-
-            rb.OnDangerLevelChanged += () => { if (rb == GetCurrentRoomBound()) UpdateRoomStatusUI(rb); };
-            rb.OnRoomDestroyed += () => { if (rb == GetCurrentRoomBound()) UpdateRoomStatusUI(rb); };
-
-            cameraUnits.Add(unit);
+            if (slot.cctvCamera) slot.cctvCamera.enabled = false;
         }
+
+        if (overlayCam) overlayCam.gameObject.SetActive(false);
     }
 
-    #endregion
+    private void Start() => SwitchToCameraByIndex(0);
 
-    #region ▶ CCTV 제어 함수
-
-    public void StartCCTVView(int index)
+    // ────────────────── Public API ──────────────────
+    public void SwitchToCameraByIndex(int idx)
     {
+        if (idx < 0 || idx >= cctvList.Count || idx == currentCameraIndex) return;
+        SetActiveCamera(idx);
+    }
+    public void SwitchNextCamera() => SetActiveCamera((currentCameraIndex + 1) % cctvList.Count);
+    public void SwitchPrevCamera() => SetActiveCamera((currentCameraIndex - 1 + cctvList.Count) % cctvList.Count);
+
+    public void StartCCTVView()
+    {
+        if (isViewing) return;
+
         isViewing = true;
-        playerCam.gameObject.SetActive(false);
-        virtualCam.gameObject.SetActive(true);
+        ResetRotation();
 
-        PlayTransitionEffect(() =>
+        if (playerCam) playerCam.gameObject.SetActive(false);
+        if (overlayCam) overlayCam.gameObject.SetActive(true);
+
+        if (playerController)
         {
-            SwitchToCamera(index);
-            cctvWorldCanvas?.SetActive(true);
-
-            playerController?.StopMove();
-            EventSystem.current.sendNavigationEvents = false;
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        });
+            playerController.StopMove();
+            if (playerController.playerInput) playerController.playerInput.enabled = false;
+        }
     }
 
     public void EndCCTVView()
     {
+        if (!isViewing) return;
         isViewing = false;
 
-        PlayTransitionEffect(() =>
+        if (playerCam) playerCam.gameObject.SetActive(true);
+        if (overlayCam) overlayCam.gameObject.SetActive(false);
+
+        if (playerController)
         {
-            virtualCam.gameObject.SetActive(false);
-            playerCam.gameObject.SetActive(true);
-            virtualCam.Follow = mainRoomViewpoint;
-            virtualCam.LookAt = mainRoomViewpoint;
-
-            cctvScreen.texture = defaultRenderTexture;
-            cctvWorldCanvas?.SetActive(false);
-
-            playerController?.StartMove();
-            EventSystem.current.sendNavigationEvents = true;
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-        });
-    }
-
-    public void SwitchToCamera(int index)
-    {
-        try
-        {
-            if (cameraUnits == null || cameraUnits.Count == 0)
-            {
-                Debug.LogWarning("카메라 유닛 없음!");
-                return;
-            }
-            if (index < 0 || index >= cameraUnits.Count)
-            {
-                Debug.LogWarning("잘못된 카메라 인덱스");
-                return;
-            }
-
-            currentIndex = index;
-            var unit = cameraUnits[index];
-            if (unit == null || unit.ViewPoint == null)
-            {
-                Debug.LogWarning("카메라 유닛 또는 뷰포인트가 null!");
-                return;
-            }
-            var room = unit.TargetRoom;
-            bool isCamDisabled = !room.CCTVEnabled;
-
-            PlayTransitionEffect(() =>
-            {
-                if (virtualCam != null && unit.ViewPoint != null)
-                {
-                    virtualCam.Follow = unit.ViewPoint;
-                    virtualCam.LookAt = unit.ViewPoint;
-                }
-                if (cctvScreen != null)
-                    cctvScreen.texture = (isCamDisabled ? defaultRenderTexture : unit.OutputTexture);
-                if (cameraNameText != null)
-                    cameraNameText.text = $"CAMERA - {unit.RoomID}";
-                if (room != null)
-                    UpdateRoomStatusUI(room);
-                if (transitionEffectObject != null)
-                    transitionEffectObject.SetActive(isCamDisabled);
-            });
-        }
-        catch (Exception e)
-        {
-            Debug.LogError("CCTV 콜백 예외: " + e);
+            playerController.StartMove();
+            if (playerController.playerInput) playerController.playerInput.enabled = true;
         }
     }
 
-    private void UpdateRoomStatusUI(RoomBound room)
+    // ────────────────── 내부 로직 ──────────────────
+    private void SetActiveCamera(int idx, bool instantFade = false)
     {
-        if (room == null) return;
-        alertIcon.enabled = room.CurrentDangerLevel >= 0.8f;
-        destroyedIcon.enabled = room.IsDestroyed;
-    }
-
-    public void SwitchToCameraByIndex(int index) => SwitchToCamera(index);
-    public CCTVCameraUnit GetCameraUnitByIndex(int index) => index >= 0 && index < cameraUnits.Count ? cameraUnits[index] : null;
-    public CCTVCameraUnit GetCurrentUnit() => GetCameraUnitByIndex(currentIndex);
-    public RoomBound GetCurrentRoomBound() => GetCurrentUnit()?.TargetRoom;
-    public Camera GetCurrentCamera() => GetCurrentUnit()?.Cam;
-
-    private void PlayTransitionEffect(System.Action onComplete)
-    {
-        if (transitionEffectObject == null)
+        if (currentCameraIndex >= 0 && currentCameraIndex < cctvList.Count)
         {
-            onComplete?.Invoke();
-            return;
+            var prevCam = cctvList[currentCameraIndex].cctvCamera;
+            if (prevCam) prevCam.enabled = false;
         }
 
-        transitionEffectObject.SetActive(true);
-        DOVirtual.DelayedCall(0.2f, () =>
+        currentCameraIndex = idx;
+
+        var slot = cctvList[idx];
+        if (slot.cctvCamera) slot.cctvCamera.enabled = true;
+        if (mainCCTVScreen) mainCCTVScreen.texture = slot.renderTexture;
+
+        // TODO: 추후 페이드 인아웃 효과 넣기
+
+        ResetRotation();
+        OnCameraSwitched?.Invoke(idx, slot.cameraName);
+    }
+
+    private void ResetRotation()
+    {
+        cctvYaw = Mathf.Clamp(0f, yawLimit.x, yawLimit.y);
+        cctvPitch = Mathf.Clamp(0f, pitchLimit.x, pitchLimit.y);
+        var pivot = GetCurrentPivot();
+        if (pivot) pivot.localRotation = Quaternion.identity;
+    }
+
+    private Transform GetCurrentPivot() =>
+        (currentCameraIndex >= 0 && currentCameraIndex < cctvList.Count) ? cctvList[currentCameraIndex].GetPivot() : null;
+
+    // ────────────────── 런타임 입력 처리 ──────────────────
+#if UNITY_EDITOR
+    private void Update()
+    {
+        // 테스트 입력: Q/E 전환, T 토글
+        if (Input.GetKeyDown(KeyCode.Q)) SwitchPrevCamera();
+        if (Input.GetKeyDown(KeyCode.E)) SwitchNextCamera();
+        if (Input.GetKeyDown(KeyCode.T))
         {
-            transitionEffectObject.SetActive(false);
-            onComplete?.Invoke();
-        });
-    }
-
-    #endregion
-
-    #region ▶ 외부 인터페이스
-
-    public void ToggleRoomDoor()
-    {
-        GetCurrentRoomBound()?.ToggleDoor();
-    }
-
-    public void ToggleCameraState()
-    {
-        var unit = GetCurrentUnit();
-        if (unit == null || unit.Cam == null) return;
-
-        unit.Cam.enabled = !unit.Cam.enabled;
-        unit.TargetRoom?.UpdateCameraState(unit.Cam.enabled);
-    }
-
-    public void HandleCameraStateTransition(bool isEnabled)
-    {
-        if (transitionEffectObject == null || cctvScreen == null) return;
-
-        if (!isEnabled)
-        {
-            transitionEffectObject.SetActive(true);
-            cctvScreen.texture = defaultRenderTexture;
-            UpdateRoomStatusUI(GetCurrentRoomBound());
+            if (isViewing) EndCCTVView();
+            else StartCCTVView();
         }
-        else
-        {
-            transitionEffectObject.SetActive(true);
-            DOVirtual.DelayedCall(0.3f, () =>
-            {
-                var unit = GetCurrentUnit();
-                if (unit != null)
-                {
-                    cctvScreen.texture = unit.OutputTexture;
-                }
-                transitionEffectObject.SetActive(false);
-                UpdateRoomStatusUI(GetCurrentRoomBound());
-            });
-        }
+
+        if (isViewing && !isCameraLocked && currentCameraIndex >= 0)
+            HandleMouseLook();
     }
+#endif
 
-    #endregion
-}
+    private void HandleMouseLook()
+    {
+        float mouseX = Input.GetAxis("Mouse X");
+        float mouseY = Input.GetAxis("Mouse Y");
+        if (Mathf.Approximately(mouseX, 0f) && Mathf.Approximately(mouseY, 0f)) return;
 
-//==============================================================================
-// CCTV 유닛 클래스 (Room과 연결된 카메라 단위)
-//==============================================================================
-[System.Serializable]
-public class CCTVCameraUnit
-{
-    public string RoomID;
-    public Camera Cam;
-    public RenderTexture OutputTexture;
-    public Transform ViewPoint;
-    public RoomBound TargetRoom;
+        // 1. 누적값 계산
+        cctvYaw += mouseX * rotationSpeed * Time.deltaTime;
+        cctvPitch += (invertY ? mouseY : -mouseY) * rotationSpeed * Time.deltaTime;
+
+        // 2. 글로벌 제한 적용
+        cctvYaw = Mathf.Clamp(cctvYaw, yawLimit.x, yawLimit.y);
+        cctvPitch = Mathf.Clamp(cctvPitch, pitchLimit.x, pitchLimit.y);
+
+        // 3. 적용
+        var pivot = GetCurrentPivot();
+        if (pivot) pivot.localRotation = Quaternion.Euler(cctvPitch, cctvYaw, 0f);
+    }
 }
